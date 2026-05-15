@@ -3,7 +3,7 @@
 SO-101ロボットアームのシミュレーション環境です。  
 キーボードによる手動操作と、PPO強化学習によるキューブ把持の学習・デモが行えます。
 
-![Screen](./demo2.gif)
+![Screen](./images/demo2.gif)
 
 ---
 
@@ -64,7 +64,7 @@ tensorboard --logdir genesis_so101_rl/logs
 
 ## キーボード操作マッピング
 
-![Screen](./demo1.gif)
+![Screen](./images/demo1.gif)
 
 キーボード操作モードでは以下のキーで各関節を動かせます。
 
@@ -204,11 +204,106 @@ robot = scene.add_entity(
 
 ---
 
+---
+
+## 並列学習版（so101_parallel.py）
+
+`so101_parallel.py` はGenesisのネイティブ並列機能を使って、**1つのシーンに複数のロボットを同時実行**しながら学習できる拡張版です。  
+台数を増やすほど同じ時間でより多くの経験を集められ、学習が速くなります。
+
+### セットアップ
+
+```
+Genesis/
+└── examples/
+    ├── so101_mac_viewer.py    ← 既存のシングル版
+    └── so101_parallel.py      ← 並列版（新規追加）
+```
+
+追加の依存ライブラリは不要です。
+
+---
+
+### 実行方法
+
+#### 並列学習（ビューワーあり）
+```bash
+# 5並列（デフォルト）
+python so101_parallel.py --mode train
+
+# 台数を指定
+python so101_parallel.py --mode train --n_envs 10
+python so101_parallel.py --mode train --n_envs 20
+```
+
+#### 並列学習（ビューワーなし・高速）
+```bash
+python so101_parallel.py --mode train --no_viewer
+python so101_parallel.py --mode train --n_envs 50 --no_viewer
+```
+
+#### Apple Silicon Mac で高速化（Metal バックエンド）
+```bash
+# --backend metal で GPU加速（M1/M2/M3 Mac推奨）
+python so101_parallel.py --mode train --n_envs 20 --backend metal
+python so101_parallel.py --mode train --n_envs 50 --backend metal --no_viewer
+```
+
+#### 学習してそのままデモ
+```bash
+python so101_parallel.py --mode traindemo --n_envs 10
+```
+
+#### 既存モデルでデモ
+```bash
+python so101_parallel.py --mode demo
+python so101_parallel.py --mode demo --episodes 10
+```
+
+#### キーボードテレオペ（環境確認）
+```bash
+python so101_parallel.py
+python so101_parallel.py --mode teleop
+```
+
+---
+
+### コマンドライン引数一覧
+
+| 引数 | デフォルト | 説明 |
+|------|-----------|------|
+| `--mode` | なし（テレオペ） | `train` / `demo` / `traindemo` / `teleop` |
+| `--n_envs` | `5` | 並列環境数。増やすほど学習が速くなる |
+| `--no_viewer` | OFF | ビューワーを無効化して高速化 |
+| `--backend` | `cpu` | `cpu` / `metal` / `cuda` / `gpu` |
+| `--model_path` | 自動検索 | demoモード時のモデルパス（.zip） |
+| `--episodes` | `5` | デモのエピソード数 |
+
+---
+
+### 並列数の目安
+
+カメラはビューワーが見切れないよう**台数に応じて自動調整**されます。
+
+| `--n_envs` | グリッド配置 | 推奨バックエンド |
+|-----------|------------|----------------|
+| 1〜5 | 1×1〜3×2 | cpu |
+| 5〜16 | 3×2〜4×4 | cpu / metal |
+| 16〜50 | 4×4〜8×7 | metal（`--no_viewer` 推奨） |
+| 50〜 | 8×7以上 | metal + `--no_viewer` |
+
+> **Apple Silicon Mac の場合**  
+> `--backend metal` を付けると GPU 加速が有効になり、CPUより数倍速く学習できます。  
+> 大量並列（20体以上）は `--no_viewer` と組み合わせるのがおすすめです。
+
+---
+
 ## ファイル構成
 
 ```
 examples/
-├── so101_mac_viewer.py   # メインスクリプト
+├── so101_mac_viewer.py   # メインスクリプト（シングル版）
+├── so101_parallel.py     # 並列学習版（5〜50体同時実行）
 ├── so101_urdf/           # SO-101 URDFファイル（初回自動ダウンロード）
 │   ├── so101.urdf
 │   └── assets/
