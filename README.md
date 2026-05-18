@@ -5,6 +5,10 @@ SO-101ロボットアームのシミュレーション環境です。
 
 ![Screen](./images/demo2.gif)
 
+
+Genesisの説明はこちら
+https://oggata.github.io/genesis-so101-arm-demo/docs/slides.html
+
 ---
 
 ## セットアップ
