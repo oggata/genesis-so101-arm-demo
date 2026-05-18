@@ -557,6 +557,44 @@ reward_cfg = {
 
 ---
 
+
+# Go2 報酬設計2
+
+<div class="cols">
+<div>
+
+```python
+reward_cfg = {
+    "tracking_sigma": 0.25,
+    "base_height_target": 0.3,    # 目標体高 30cm
+    "reward_scales": {
+        "tracking_lin_vel":   1.0,
+        "tracking_ang_vel":   0.2,
+        "base_height":       -20.0,  # 体高罰則を緩める
+        "action_rate":       -0.005,
+        "similar_to_default": 0.0,   # 姿勢制約を外す
+        "lin_vel_z":         +1.0,   # 上方向を加点に反転
+    }
+}
+```
+
+| # | 報酬項目 | 符号 | 役割 |
+|---|----------|------|------|
+| ① | 速度追従 | ＋ | 目標速度 0.5m/s への追従 |
+| ③ | Z速度 | − | 無駄な上下動を抑制 |
+| ④ | 体高維持 | − | 低姿勢・転倒を強く罰則（×-50） |
+| ⑤ | 動作変化率 | − | 滑らかな動作を促進 |
+
+</div>
+<div class="img-box">
+
+![Screen](./images/chapter3-1.gif)
+
+</div>
+</div>
+
+---
+
 # Go2 PPO学習設定
 
 <div class="cols">
@@ -596,7 +634,7 @@ python examples/locomotion/go2_train.py \
 </div>
 <div class="img-box">
 
-![Screen](./images/chapter3.gif)
+![Screen](./images/chapter3-1.gif)
 
 </div>
 </div>

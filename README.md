@@ -9,6 +9,8 @@ SO-101ロボットアームのシミュレーション環境です。
 Genesisの説明はこちら
 https://oggata.github.io/genesis-so101-arm-demo/docs/slides.html
 
+marp genesis_slides_marp.md -o docs/slides.html
+
 ---
 
 ## セットアップ
