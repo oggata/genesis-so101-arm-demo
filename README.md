@@ -13,6 +13,23 @@ marp genesis_slides_marp.md -o docs/slides.html
 
 ---
 
+## ブラウザ版（three.js / Genesis不要・Astra等のエージェント操作用）
+
+`docs/sim/index.html` 1ファイルで動きます。GitHub Pagesなら
+https://oggata.github.io/genesis-so101-arm-demo/docs/sim/ で公開されます。
+
+```bash
+cd docs/sim && python3 -m http.server 8000   # → http://localhost:8000
+```
+
+- 画面に OVERHEAD（cmグリッド付き俯瞰）/ WRIST（手首）/ MAIN の3カメラと STATE（数値）が並ぶので、エージェントはスクショで状況を把握できます
+- 操作は COMMAND 欄に入力して Enter（例: `open; move_to 18 -5 6; move_to 18 -5 1.3; close; move_to 4 20 8; open`）。一覧は `help`
+- JSを実行できるエージェントは `await robot.run("...")` / `robot.getState()` / `robot.snapshot("overhead")` も使えます
+- 関節リミット・床めり込み・速度上限はシム側で強制（範囲外の指令は ERROR で拒否）
+- 物理は簡易版（把持は「爪の間にキューブがあって閉じたら掴む」、離すと真下に落下・積み重ね可）
+
+---
+
 ## セットアップ
 
 ### 1. ファイルを配置する
