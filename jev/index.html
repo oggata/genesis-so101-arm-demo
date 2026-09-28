@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SO-101 Jev Sim</title>
+<!--
+  SO-101 ブラウザシミュレーター（three.js版）Jev 操作バージョン
+  - docs/sim/index.html のコピーに、Jev エージェント（server-jev.js）との接続パネルを追加したもの。
+  - node jev/server-jev.js で起動し http://localhost:3000 を開く。
+  - Genesis不要。ブラウザだけで動く。
+  - Astra等のブラウザ操作エージェントが「画面を見て → ボタン/コマンド入力で操作」できるように作ってある。
+  - 単位: 位置 = cm, 角度 = deg, グリッパー = 開き具合 0〜100(%)
+  - 座標系: 原点 = アームの根元, +x = 前方, +y = 左, +z = 上
+-->
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --ink: #1d2330; --muted: #667085;
+    --line: #d9dde5; --accent: #2563eb; --accent-ink: #ffffff; --ok: #15803d; --err: #b91c1c;
+    --code-bg: #f1f3f7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12151b; --panel: #1b1f27; --ink: #e6e9ef; --muted: #98a2b3;
+      --line: #2c3240; --accent: #3b82f6; --accent-ink: #ffffff; --ok: #4ade80; --err: #f87171;
+      --code-bg: #232835;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12151b; --panel: #1b1f27; --ink: #e6e9ef; --muted: #98a2b3;
+    --line: #2c3240; --accent: #3b82f6; --accent-ink: #ffffff; --ok: #4ade80; --err: #f87171;
+    --code-bg: #232835;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", sans-serif;
+  }
+  header { padding: 10px 16px; border-bottom: 1px solid var(--line); display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+  header h1 { font-size: 17px; margin: 0; }
+  header span { color: var(--muted); font-size: 12px; }
+  main {
+    display: grid; gap: 12px; padding: 12px 16px;
+    grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
+  }
+  @media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px; min-width: 0; }
+  .card h2 { font-size: 13px; margin: 0 0 8px; color: var(--muted); font-weight: 600; letter-spacing: .02em; }
+  .view { position: relative; width: 100%; aspect-ratio: 4 / 3; border-radius: 6px; overflow: hidden; background: #000; }
+  .view canvas { width: 100% !important; height: 100% !important; display: block; }
+  .view .tag {
+    position: absolute; left: 6px; top: 6px; padding: 2px 7px; border-radius: 4px;
+    background: rgba(0,0,0,.65); color: #ffd84d; font: 600 12px/1.4 ui-monospace, Menlo, monospace; pointer-events: none;
+  }
+  .cams { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  @media (max-width: 560px) { .cams { grid-template-columns: 1fr; } }
+  .col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  pre#state {
+    margin: 0; padding: 8px; background: var(--code-bg); border-radius: 6px;
+    font: 12px/1.45 ui-monospace, Menlo, monospace; white-space: pre-wrap; word-break: break-word;
+  }
+  table.joints { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.joints td { padding: 3px 2px; white-space: nowrap; }
+  table.joints td.name { font-family: ui-monospace, Menlo, monospace; }
+  table.joints td.val { font-family: ui-monospace, Menlo, monospace; text-align: right; min-width: 64px; }
+  button {
+    font: inherit; font-size: 12.5px; padding: 3px 8px; border-radius: 5px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  input[type=text], input[type=number] {
+    font: 13px ui-monospace, Menlo, monospace; padding: 5px 7px; border-radius: 5px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--ink); min-width: 0;
+  }
+  input#cmd { flex: 1 1 240px; }
+  input.num { width: 70px; }
+  #log {
+    margin-top: 8px; height: 170px; overflow: auto; padding: 6px 8px; background: var(--code-bg);
+    border-radius: 6px; font: 12px/1.5 ui-monospace, Menlo, monospace; white-space: pre-wrap;
+  }
+  #log .ok { color: var(--ok); } #log .err { color: var(--err); }
+  details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  details pre { font: 12px/1.5 ui-monospace, Menlo, monospace; background: var(--code-bg); padding: 8px; border-radius: 6px; white-space: pre-wrap; }
+  .joints-wrap { overflow-x: auto; }
+  .pill { font: 600 12px/1.6 ui-monospace, Menlo, monospace; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .pill.on { color: var(--ok); border-color: var(--ok); }
+  .pill.err { color: var(--err); border-color: var(--err); }
+  pre#jev-decision {
+    margin: 8px 0 0; padding: 8px; background: var(--code-bg); border-radius: 6px; min-height: 60px;
+    font: 12px/1.45 ui-monospace, Menlo, monospace; white-space: pre-wrap; word-break: break-word;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>SO-101 Jev Sim</h1>
+  <span>単位: 位置 cm / 角度 deg / グリッパー 0(閉)〜100(開) ・ 座標: 原点=アーム根元, +x=前, +y=左, +z=上</span>
+</header>
+
+<main>
+  <div class="col">
+    <section class="card">
+      <div class="cams">
+        <div class="view" id="view-overhead"><div class="tag">OVERHEAD (grid cm, ↑=+x)</div></div>
+        <div class="view" id="view-wrist"><div class="tag">WRIST</div></div>
+        <div class="view" id="view-main"><div class="tag">MAIN (drag to orbit)</div></div>
+        <pre id="state">loading…</pre>
+      </div>
+    </section>
+  </div>
+
+  <div class="col">
+    <section class="card" id="jev-card">
+      <h2>JEV AGENT</h2>
+      <div class="row">
+        <span id="jev-conn" class="pill">server: 未接続</span>
+        <span id="jev-status" class="pill">stopped</span>
+        <button id="jev-start" class="primary">Start Jev</button>
+        <button id="jev-stop">Stop Jev</button>
+      </div>
+      <pre id="jev-decision">-</pre>
+    </section>
+
+    <section class="card">
+      <h2>COMMAND（1行に複数可: ; 区切り / Enterで実行）</h2>
+      <div class="row">
+        <input id="cmd" type="text" placeholder="例: open; move_to 18 -5 6; move_to 18 -5 1.3; close; move_to 18 -5 8" autocomplete="off">
+        <button id="cmd-run" class="primary">Run</button>
+      </div>
+      <div id="log" aria-live="polite"></div>
+    </section>
+
+    <section class="card">
+      <h2>JOINTS</h2>
+      <div class="joints-wrap"><table class="joints" id="joint-table"></table></div>
+      <div class="row" style="margin-top:8px">
+        <button id="btn-open">Gripper open</button>
+        <button id="btn-close">Gripper close</button>
+        <button id="btn-home">Home</button>
+        <button id="btn-reset">Reset scene</button>
+        <button id="btn-stop">Stop</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <span>move_to (cm):</span>
+        x <input class="num" id="mt-x" type="number" step="0.5" value="18">
+        y <input class="num" id="mt-y" type="number" step="0.5" value="0">
+        z <input class="num" id="mt-z" type="number" step="0.5" value="8">
+        <button id="mt-go" class="primary">Go</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <details>
+        <summary>コマンド一覧 / JS API</summary>
+<pre>move_to X Y Z [PITCH]   グリッパー先端(TCP=爪の中心)を (X,Y,Z)cm へ。PITCHは手先の向き(deg, 既定 -90=真下)
+move_by DX DY DZ        現在のTCPから相対移動(cm)
+joint NAME DEG          関節を絶対角度へ   例: joint wrist_roll 45
+nudge NAME DEG          関節を相対回転     例: nudge shoulder_pan -10
+joints A B C D E [G]    5関節(+グリッパー)をまとめて指定
+gripper PCT             0=閉 〜 100=全開
+open / close            グリッパー全開 / 全閉（物体があればそこで止まる）
+home                    初期姿勢へ
+reset [SEED]            キューブを再配置
+speed DEG_PER_S         関節の最大速度（既定 60）
+wait MS                 待機
+state                   状態をログに出力
+help                    このヘルプ
+
+関節名: shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll, gripper
+キューブ: 一辺 2.5cm（中心の高さ z=1.25）。トレイに入れると "in tray" に表示される。
+
+JS (エージェントがJSを実行できる場合):
+  await robot.run("move_to 18 0 5; close")   → 結果文字列
+  robot.getState()                            → JSON
+  robot.snapshot("overhead"|"wrist"|"main")   → PNG dataURL</pre>
+      </details>
+    </section>
+  </div>
+</main>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+// ------------------------------------------------------------
+// 定数（m / rad で内部計算、UIは cm / deg）
+// ------------------------------------------------------------
+THREE.Object3D.DEFAULT_UP.set(0, 0, 1);   // Z-up
+const DEG = Math.PI / 180;
+const H_SHOULDER = 0.10;   // 肩ピッチ軸の高さ
+const L1 = 0.116;          // 上腕
+const L2 = 0.135;          // 前腕
+const L3 = 0.090;          // 手首ピッチ軸 → TCP（爪の中心）
+const FINGER_EXT = 0.010;  // TCP から爪先まで
+const CUBE = 0.025;
+const TRAY = { x: 0.04, y: 0.20, size: 0.10, floor: 0.004 };
+const MIN_TIP_Z = 0.001;   // 爪先がこれより下に行く指令は拒否
+
+const JOINTS = [
+  { name: "shoulder_pan",  min: -110, max: 110 },
+  { name: "shoulder_lift", min: -100, max: 100 },
+  { name: "elbow_flex",    min: -150, max: 150 },
+  { name: "wrist_flex",    min: -110, max: 110 },
+  { name: "wrist_roll",    min: -180, max: 180 },
+  { name: "gripper",       min: 0,    max: 100 },
+];
+const HOME = [0, 20, 100, 60, 0, 30];
+const CUBE_COLORS = { red: 0xe5484d, green: 0x30a46c, blue: 0x3e63dd, yellow: 0xf5d90a, orange: 0xf76b15 };
+
+const q = HOME.slice();         // 現在値 (deg / %)
+const qTarget = HOME.slice();   // 目標値
+let jointSpeed = 60;            // deg/s
+const GRIPPER_SPEED = 120;      // %/s
+
+// ------------------------------------------------------------
+// 順運動学（検証・表示用）
+// ------------------------------------------------------------
+function fk(qq, ext = 0) {
+  const p = qq[0] * DEG;
+  const e1 = (90 - qq[1]) * DEG;
+  const e2 = e1 - qq[2] * DEG;
+  const e3 = e2 - qq[3] * DEG;
+  const r = L1 * Math.cos(e1) + L2 * Math.cos(e2) + (L3 + ext) * Math.cos(e3);
+  const z = H_SHOULDER + L1 * Math.sin(e1) + L2 * Math.sin(e2) + (L3 + ext) * Math.sin(e3);
+  return new THREE.Vector3(r * Math.cos(p), r * Math.sin(p), z);
+}
+
+// 逆運動学: TCPを (x,y,z)[m] に、手先ピッチ pitchDeg（水平からの角度, -90=真下）で
+function ik(x, y, z, pitchDeg = -90) {
+  const pan = Math.atan2(y, x) / DEG;
+  const r = Math.hypot(x, y);
+  const e3 = pitchDeg * DEG;
+  const wr = r - L3 * Math.cos(e3);
+  const wz = z - L3 * Math.sin(e3) - H_SHOULDER;
+  const d2 = wr * wr + wz * wz;
+  const c = (d2 - L1 * L1 - L2 * L2) / (2 * L1 * L2);
+  if (c > 1 || c < -1) return { error: "届かない位置です (out of reach)" };
+  const beta = Math.acos(c);
+  const e1 = Math.atan2(wz, wr) + Math.atan2(L2 * Math.sin(beta), L1 + L2 * Math.cos(beta));
+  const e2 = e1 - beta;
+  return { q: [pan, 90 - e1 / DEG, beta / DEG, (e2 - e3) / DEG] };
+}
+
+function validate(qq) {
+  for (let i = 0; i < JOINTS.length; i++) {
+    const j = JOINTS[i];
+    if (qq[i] < j.min - 1e-6 || qq[i] > j.max + 1e-6)
+      return `${j.name}=${qq[i].toFixed(1)} は可動範囲 [${j.min}, ${j.max}] 外です`;
+  }
+  // 爪先・手首・肘が床より下に行かないか
+  const tip = fk(qq, FINGER_EXT);
+  if (tip.z < MIN_TIP_Z) return `爪先が床より下になります (z=${(tip.z * 100).toFixed(1)}cm)`;
+  const wrist = fk(qq, -L3);
+  if (wrist.z < 0.02) return "手首が床に当たります";
+  return null;
+}
+
+// ------------------------------------------------------------
+// シーン
+// ------------------------------------------------------------
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xdfe3ea);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8f99, 1.1));
+const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+sun.position.set(0.4, -0.3, 1.0);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+Object.assign(sun.shadow.camera, { left: -0.4, right: 0.4, top: 0.4, bottom: -0.4, near: 0.1, far: 3 });
+scene.add(sun);
+
+// 机（cmグリッド＋座標ラベル入りテクスチャ）
+const TABLE = { xmin: -0.20, xmax: 0.40, ymin: -0.30, ymax: 0.30 };
+function makeTableTexture() {
+  const W = 2048, span = TABLE.xmax - TABLE.xmin, px = W / span;   // px per meter
+  const cv = document.createElement("canvas"); cv.width = cv.height = W;
+  const g = cv.getContext("2d");
+  g.fillStyle = "#f3efe6"; g.fillRect(0, 0, W, W);
+  const toPx = (x, y) => [(x - TABLE.xmin) * px, (TABLE.ymax - y) * px];
+  for (let cm = -30; cm <= 40; cm++) {
+    const m = cm / 100;
+    const major = cm % 5 === 0;
+    g.strokeStyle = cm === 0 ? "#333" : major ? "#a59f92" : "#ddd6c8";
+    g.lineWidth = cm === 0 ? 4 : major ? 2.5 : 1;
+    if (m >= TABLE.xmin && m <= TABLE.xmax) { const [X] = toPx(m, 0); g.beginPath(); g.moveTo(X, 0); g.lineTo(X, W); g.stroke(); }
+    if (m >= TABLE.ymin && m <= TABLE.ymax) { const [, Y] = toPx(0, m); g.beginPath(); g.moveTo(0, Y); g.lineTo(W, Y); g.stroke(); }
+  }
+  // ラベル: 俯瞰カメラ(画面上=+x)で読める向きに回転して描く
+  g.fillStyle = "#6b6456"; g.font = "bold 46px Menlo, monospace"; g.textAlign = "center"; g.textBaseline = "middle";
+  const label = (text, x, y) => {
+    const [X, Y] = toPx(x, y);
+    g.save(); g.translate(X, Y); g.rotate(Math.PI / 2); g.fillText(text, 0, 0); g.restore();
+  };
+  for (let cm = -15; cm <= 35; cm += 5) if (cm !== 0) label(`x${cm}`, cm / 100, -0.275);
+  for (let cm = -25; cm <= 25; cm += 5) if (cm !== 0) label(`y${cm}`, -0.105, cm / 100);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.anisotropy = 8; tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+const table = new THREE.Mesh(
+  new THREE.PlaneGeometry(TABLE.xmax - TABLE.xmin, TABLE.ymax - TABLE.ymin),
+  new THREE.MeshStandardMaterial({ map: makeTableTexture(), roughness: 0.95 })
+);
+table.position.set((TABLE.xmin + TABLE.xmax) / 2, (TABLE.ymin + TABLE.ymax) / 2, 0);
+table.receiveShadow = true;
+scene.add(table);
+
+// 軸表示（x=赤, y=緑）
+function axisArrow(dir, color) {
+  const a = new THREE.ArrowHelper(dir, new THREE.Vector3(0, 0, 0.0015), 0.06, color, 0.012, 0.008);
+  scene.add(a);
+}
+axisArrow(new THREE.Vector3(1, 0, 0), 0xd33); axisArrow(new THREE.Vector3(0, 1, 0), 0x2a2);
+
+// トレイ
+const trayGroup = new THREE.Group();
+trayGroup.position.set(TRAY.x, TRAY.y, 0);
+{
+  const mat = new THREE.MeshStandardMaterial({ color: 0x8aa3c7, roughness: 0.6, transparent: true, opacity: 0.85 });
+  const floor = new THREE.Mesh(new THREE.BoxGeometry(TRAY.size, TRAY.size, TRAY.floor), mat);
+  floor.position.z = TRAY.floor / 2; floor.receiveShadow = true; trayGroup.add(floor);
+  const rimH = 0.012, t = 0.004;
+  for (const [sx, sy, px, py] of [[TRAY.size, t, 0, TRAY.size / 2], [TRAY.size, t, 0, -TRAY.size / 2], [t, TRAY.size, TRAY.size / 2, 0], [t, TRAY.size, -TRAY.size / 2, 0]]) {
+    const rim = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, rimH), mat);
+    rim.position.set(px, py, rimH / 2); rim.castShadow = true; trayGroup.add(rim);
+  }
+}
+scene.add(trayGroup);
+
+// ------------------------------------------------------------
+// アーム
+// ------------------------------------------------------------
+const matBody = new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.5 });
+const matDark = new THREE.MeshStandardMaterial({ color: 0x2b2f36, roughness: 0.6 });
+const matAccent = new THREE.MeshStandardMaterial({ color: 0xff8a00, roughness: 0.5 });
+function box(w, d, h, mat, z = h / 2, x = 0, y = 0) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, d, h), mat);
+  m.position.set(x, y, z); m.castShadow = true; return m;
+}
+function hinge(mat = matDark) {   // Y軸まわりの関節を示す円柱
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.042, 24), mat);
+  m.castShadow = true; return m;   // CylinderGeometryは既定でY軸方向
+}
+
+const base = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.05, 0.05, 32), matDark);
+base.rotation.x = Math.PI / 2; base.position.z = 0.025; base.castShadow = true;
+scene.add(base);
+
+const panG = new THREE.Group(); panG.position.z = 0.05; scene.add(panG);
+panG.add(box(0.05, 0.05, 0.05, matBody));
+const liftG = new THREE.Group(); liftG.position.z = H_SHOULDER - 0.05; panG.add(liftG);
+liftG.add(hinge());
+liftG.add(box(0.03, 0.036, L1, matBody));
+const elbowG = new THREE.Group(); elbowG.position.z = L1; liftG.add(elbowG);
+elbowG.add(hinge());
+elbowG.add(box(0.028, 0.032, L2, matBody));
+const wristG = new THREE.Group(); wristG.position.z = L2; elbowG.add(wristG);
+wristG.add(hinge(matAccent));
+wristG.add(box(0.026, 0.03, 0.03, matBody, 0.015));
+const rollG = new THREE.Group(); rollG.position.z = 0.0; wristG.add(rollG);
+// 手のひら + 爪（爪は x方向に開閉）
+rollG.add(box(0.05, 0.03, 0.014, matDark, L3 - 0.03));
+const jawGeo = [0.006, 0.02, 0.042];
+// 爪先（jawの先端）= L3 + FINGER_EXT
+const jawA = box(...jawGeo, matAccent, L3 + FINGER_EXT - jawGeo[2] / 2);
+const jawB = box(...jawGeo, matAccent, L3 + FINGER_EXT - jawGeo[2] / 2);
+rollG.add(jawA, jawB);
+
+const openingOf = (g) => 0.004 + (g / 100) * 0.066;   // 爪の内側間隔[m]
+const gripperPctFor = (width) => ((width - 0.004) / 0.066) * 100;
+
+// ------------------------------------------------------------
+// キューブ
+// ------------------------------------------------------------
+const cubes = Object.entries(CUBE_COLORS).map(([name, color]) => {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(CUBE, CUBE, CUBE),
+    new THREE.MeshStandardMaterial({ color, roughness: 0.45 }));
+  m.castShadow = m.receiveShadow = true;
+  scene.add(m);
+  return { name, mesh: m, vz: 0, falling: false };
+});
+let held = null;
+
+function mulberry32(a) {
+  return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+function resetCubes(seed) {
+  if (held) { scene.attach(held.mesh); held = null; }
+  const rnd = mulberry32(seed ?? Math.floor(Math.random() * 1e9));
+  const placed = [];
+  for (const c of cubes) {
+    let x, y, tries = 0;
+    do {
+      x = 0.12 + rnd() * 0.12; y = -0.14 + rnd() * 0.24; tries++;
+    } while (tries < 200 && (Math.hypot(x, y) > 0.22 || placed.some(([px, py]) => Math.hypot(px - x, py - y) < 0.045)));  // 22cm以内 = 確実に届く範囲
+    placed.push([x, y]);
+    c.mesh.position.set(x, y, CUBE / 2);
+    c.mesh.rotation.set(0, 0, (rnd() - 0.5) * 0.6);
+    c.vz = 0; c.falling = false;
+  }
+}
+
+// 落下先の高さ（下にある物体の上面）
+function restHeight(c) {
+  const p = c.mesh.position;
+  let top = 0;
+  if (Math.abs(p.x - TRAY.x) < TRAY.size / 2 && Math.abs(p.y - TRAY.y) < TRAY.size / 2) top = TRAY.floor;
+  for (const o of cubes) {
+    if (o === c || o === held || o.falling) continue;
+    const op = o.mesh.position;
+    if (Math.abs(op.x - p.x) < CUBE * 0.9 && Math.abs(op.y - p.y) < CUBE * 0.9 && op.z < p.z)
+      top = Math.max(top, op.z + CUBE / 2);
+  }
+  return top + CUBE / 2;
+}
+
+// ------------------------------------------------------------
+// カメラ / レンダラー
+// ------------------------------------------------------------
+function makeRenderer(el) {
+  const r = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+  r.setPixelRatio(Math.min(devicePixelRatio, 2));
+  r.shadowMap.enabled = true;
+  el.prepend(r.domElement);
+  return r;
+}
+const views = {
+  main: { el: document.getElementById("view-main") },
+  overhead: { el: document.getElementById("view-overhead") },
+  wrist: { el: document.getElementById("view-wrist") },
+};
+for (const v of Object.values(views)) v.renderer = makeRenderer(v.el);
+
+views.main.camera = new THREE.PerspectiveCamera(45, 4 / 3, 0.01, 10);
+views.main.camera.position.set(0.50, -0.42, 0.36);
+const controls = new OrbitControls(views.main.camera, views.main.renderer.domElement);
+controls.target.set(0.10, 0.02, 0.05); controls.update();
+
+// 俯瞰: 正射影、画面上 = +x（ロボットの前方）、画面右 = -y
+views.overhead.camera = new THREE.OrthographicCamera(-0.30, 0.30, 0.225, -0.225, 0.01, 2);
+views.overhead.camera.up.set(1, 0, 0);
+views.overhead.camera.position.set(0.10, 0, 1.0);
+views.overhead.camera.lookAt(0.10, 0, 0);
+
+views.wrist.camera = new THREE.PerspectiveCamera(75, 4 / 3, 0.004, 3);
+const _wp = new THREE.Vector3(), _wt = new THREE.Vector3(), _wu = new THREE.Vector3();
+function updateWristCamera() {
+  rollG.updateWorldMatrix(true, false);
+  _wp.set(0, -0.032, L3 - 0.03).applyMatrix4(rollG.matrixWorld);
+  _wt.set(0, 0, L3 + 0.08).applyMatrix4(rollG.matrixWorld);
+  _wu.set(0, 1, 0).transformDirection(rollG.matrixWorld);
+  const cam = views.wrist.camera;
+  cam.position.copy(_wp); cam.up.copy(_wu); cam.lookAt(_wt);
+}
+
+function resize() {
+  for (const v of Object.values(views)) {
+    const w = v.el.clientWidth, h = v.el.clientHeight;
+    if (!w || !h) continue;
+    v.renderer.setSize(w, h, false);
+    if (v.camera.isPerspectiveCamera) { v.camera.aspect = w / h; v.camera.updateProjectionMatrix(); }
+  }
+}
+new ResizeObserver(resize).observe(document.querySelector("main"));
+
+// ------------------------------------------------------------
+// シミュレーション更新
+// ------------------------------------------------------------
+function applyPose() {
+  panG.rotation.z = q[0] * DEG;
+  liftG.rotation.y = q[1] * DEG;
+  elbowG.rotation.y = q[2] * DEG;
+  wristG.rotation.y = q[3] * DEG;
+  rollG.rotation.z = q[4] * DEG;
+  const half = openingOf(q[5]) / 2 + jawGeo[0] / 2;
+  jawA.position.x = half; jawB.position.x = -half;
+}
+
+const _lp = new THREE.Vector3();
+function cubeInJaws(c) {
+  rollG.updateWorldMatrix(true, false);
+  _lp.copy(c.mesh.position).applyMatrix4(rollG.matrixWorld.clone().invert());
+  return Math.abs(_lp.x) < CUBE * 0.9 && Math.abs(_lp.y) < 0.016 &&
+         _lp.z > L3 - 0.02 && _lp.z < L3 + FINGER_EXT + 0.004;
+}
+
+let stopFlag = false;
+function stepSim(dt) {
+  // 関節を目標へ（速度制限つき）
+  for (let i = 0; i < 5; i++) {
+    const d = qTarget[i] - q[i], m = jointSpeed * dt;
+    q[i] += Math.abs(d) <= m ? d : Math.sign(d) * m;
+  }
+  // グリッパー（物体を挟んでいたらそこで止まる）
+  const gMin = held ? gripperPctFor(CUBE) : 0;
+  const gTarget = Math.max(qTarget[5], gMin);
+  const dg = gTarget - q[5], mg = GRIPPER_SPEED * dt;
+  q[5] += Math.abs(dg) <= mg ? dg : Math.sign(dg) * mg;
+  applyPose();
+
+  // 把持判定
+  if (!held && qTarget[5] < q[5] + 1e-6 && openingOf(q[5]) <= CUBE + 0.001) {
+    const c = cubes.find((c) => !c.falling && cubeInJaws(c));
+    if (c) { held = c; rollG.attach(c.mesh); q[5] = gripperPctFor(CUBE); log(`grasped ${c.name}`, "ok"); }
+  }
+  // 解放判定
+  if (held && openingOf(q[5]) > CUBE + 0.004) {
+    const c = held; held = null;
+    scene.attach(c.mesh);
+    const yaw = new THREE.Euler().setFromQuaternion(c.mesh.quaternion, "ZYX").z;
+    c.mesh.rotation.set(0, 0, yaw);
+    c.falling = true; c.vz = 0;
+    log(`released ${c.name}`, "ok");
+  }
+  // 落下
+  for (const c of cubes) {
+    if (!c.falling) continue;
+    const rest = restHeight(c);
+    c.vz -= 9.8 * dt; c.mesh.position.z += c.vz * dt;
+    if (c.mesh.position.z <= rest) { c.mesh.position.z = rest; c.vz = 0; c.falling = false; }
+  }
+}
+
+function isSettled() {
+  for (let i = 0; i < 5; i++) if (Math.abs(qTarget[i] - q[i]) > 1e-3) return false;
+  const gTarget = Math.max(qTarget[5], held ? gripperPctFor(CUBE) : 0);
+  return Math.abs(gTarget - q[5]) < 1e-3 && !cubes.some((c) => c.falling);
+}
+
+// ------------------------------------------------------------
+// 状態
+// ------------------------------------------------------------
+const r1 = (v) => Math.round(v * 10) / 10;
+const cm = (v) => r1(v * 100);
+function inTray(c) {
+  const p = c.mesh.getWorldPosition(new THREE.Vector3());
+  return c !== held && !c.falling && Math.abs(p.x - TRAY.x) < TRAY.size / 2 - CUBE / 4 && Math.abs(p.y - TRAY.y) < TRAY.size / 2 - CUBE / 4;
+}
+function getState() {
+  const tcp = fk(q);
+  return {
+    joints: Object.fromEntries(JOINTS.map((j, i) => [j.name, r1(q[i])])),
+    tcp_cm: { x: cm(tcp.x), y: cm(tcp.y), z: cm(tcp.z) },
+    holding: held ? held.name : null,
+    moving: !isSettled(),
+    cubes_cm: Object.fromEntries(cubes.map((c) => {
+      const p = c.mesh.getWorldPosition(new THREE.Vector3());
+      return [c.name, { x: cm(p.x), y: cm(p.y), z: cm(p.z) }];
+    })),
+    tray_cm: { x: cm(TRAY.x), y: cm(TRAY.y), size: cm(TRAY.size) },
+    in_tray: cubes.filter(inTray).map((c) => c.name),
+  };
+}
+function stateText(s = getState()) {
+  const f = (v) => v.toFixed(1).padStart(6);
+  const lines = [
+    `moving: ${s.moving ? "yes" : "no"}    holding: ${s.holding ?? "-"}`,
+    `TCP (cm):  x=${f(s.tcp_cm.x)}  y=${f(s.tcp_cm.y)}  z=${f(s.tcp_cm.z)}`,
+    `joints (deg):`,
+    ...JOINTS.map((j) => `  ${j.name.padEnd(14)} ${f(s.joints[j.name])}${j.name === "gripper" ? " %" : ""}`),
+    `cubes (cm, center):`,
+    ...Object.entries(s.cubes_cm).map(([n, p]) => `  ${n.padEnd(7)} x=${f(p.x)}  y=${f(p.y)}  z=${f(p.z)}`),
+    `tray: center x=${s.tray_cm.x} y=${s.tray_cm.y}, ${s.tray_cm.size}cm square`,
+    `in tray: ${s.in_tray.length ? s.in_tray.join(", ") : "-"}`,
+  ];
+  return lines.join("\n");
+}
+
+// ------------------------------------------------------------
+// コマンド
+// ------------------------------------------------------------
+const logEl = document.getElementById("log");
+function log(msg, cls = "") {
+  const d = document.createElement("div");
+  if (cls) d.className = cls;
+  d.textContent = msg;
+  logEl.appendChild(d); logEl.scrollTop = logEl.scrollHeight;
+  while (logEl.childNodes.length > 300) logEl.removeChild(logEl.firstChild);
+}
+
+function waitSettled(timeoutMs = 20000) {
+  return new Promise((resolve) => {
+    const t0 = performance.now();
+    const tick = () => {
+      if (stopFlag) return resolve("stopped");
+      if (isSettled()) return resolve("ok");
+      if (performance.now() - t0 > timeoutMs) return resolve("timeout");
+      setTimeout(tick, 30);
+    };
+    tick();
+  });
+}
+
+function setTargets(next) {
+  const err = validate(next);
+  if (err) throw new Error(err);
+  for (let i = 0; i < 6; i++) qTarget[i] = next[i];
+}
+const jointIndex = (name) => {
+  const i = JOINTS.findIndex((j) => j.name === name);
+  if (i < 0) throw new Error(`関節名が不正: ${name}（${JOINTS.map((j) => j.name).join(", ")}）`);
+  return i;
+};
+const num = (s, what) => {
+  const v = Number(s);
+  if (!Number.isFinite(v)) throw new Error(`${what} が数値ではありません: ${s}`);
+  return v;
+};
+function moveTo(xcm, ycm, zcm, pitch = -90) {
+  const r = ik(xcm / 100, ycm / 100, zcm / 100, pitch);
+  if (r.error) throw new Error(r.error);
+  setTargets([...r.q, qTarget[4], qTarget[5]]);
+}
+
+const HELP = document.querySelector("details pre").textContent;
+async function execOne(line) {
+  const [cmd, ...a] = line.trim().split(/[\s,]+/);
+  switch ((cmd || "").toLowerCase()) {
+    case "move_to": moveTo(num(a[0], "x"), num(a[1], "y"), num(a[2], "z"), a[3] !== undefined ? num(a[3], "pitch") : -90); break;
+    case "move_by": {
+      const t = fk(qTarget);
+      moveTo(cm(t.x) + num(a[0], "dx"), cm(t.y) + num(a[1], "dy"), cm(t.z) + num(a[2], "dz"), a[3] !== undefined ? num(a[3], "pitch") : -90);
+      break;
+    }
+    case "joint": { const n = qTarget.slice(); n[jointIndex(a[0])] = num(a[1], "deg"); setTargets(n); break; }
+    case "nudge": { const n = qTarget.slice(); const i = jointIndex(a[0]); n[i] += num(a[1], "deg"); setTargets(n); break; }
+    case "joints": {
+      const n = qTarget.slice();
+      a.slice(0, 6).forEach((v, i) => (n[i] = num(v, JOINTS[i].name)));
+      setTargets(n); break;
+    }
+    case "gripper": { const n = qTarget.slice(); n[5] = num(a[0], "pct"); setTargets(n); break; }
+    case "open": { const n = qTarget.slice(); n[5] = 100; setTargets(n); break; }
+    case "close": { const n = qTarget.slice(); n[5] = 0; setTargets(n); break; }
+    case "home": setTargets(HOME.slice()); break;
+    case "reset": resetCubes(a[0] !== undefined ? num(a[0], "seed") : undefined); setTargets(HOME.slice()); break;
+    case "speed": jointSpeed = Math.min(180, Math.max(5, num(a[0], "deg/s"))); return `speed = ${jointSpeed} deg/s`;
+    case "wait": await new Promise((r) => setTimeout(r, Math.min(10000, num(a[0], "ms")))); return "waited";
+    case "state": return stateText();
+    case "help": return HELP;
+    case "": return "";
+    default: throw new Error(`不明なコマンド: ${cmd}（help で一覧）`);
+  }
+  const res = await waitSettled();
+  const s = getState();
+  return `${res}  TCP=(${s.tcp_cm.x}, ${s.tcp_cm.y}, ${s.tcp_cm.z})cm  gripper=${s.joints.gripper}%  holding=${s.holding ?? "-"}`;
+}
+
+let queue = Promise.resolve();
+function run(text) {
+  const job = queue.then(async () => {
+    stopFlag = false;
+    const out = [];
+    for (const line of text.split(/[;\n]/).map((s) => s.trim()).filter(Boolean)) {
+      if (stopFlag) { out.push("stopped"); break; }
+      log(`> ${line}`);
+      try {
+        const r = await execOne(line);
+        if (r) { log(r, "ok"); out.push(r); }
+      } catch (e) {
+        log(`ERROR: ${e.message}`, "err"); out.push(`ERROR: ${e.message}`);
+        break;   // エラー以降の手順は実行しない
+      }
+    }
+    return out.join("\n");
+  });
+  queue = job.catch(() => {});
+  return job;
+}
+function stop() {
+  stopFlag = true;
+  for (let i = 0; i < 6; i++) qTarget[i] = q[i];
+  log("STOP", "err");
+}
+
+// ------------------------------------------------------------
+// UI
+// ------------------------------------------------------------
+const cmdEl = document.getElementById("cmd");
+const submit = () => { const t = cmdEl.value; if (t.trim()) { run(t); cmdEl.value = ""; } };
+cmdEl.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing) submit(); });
+document.getElementById("cmd-run").onclick = submit;
+document.getElementById("btn-open").onclick = () => run("open");
+document.getElementById("btn-close").onclick = () => run("close");
+document.getElementById("btn-home").onclick = () => run("home");
+document.getElementById("btn-reset").onclick = () => run("reset");
+document.getElementById("btn-stop").onclick = stop;
+document.getElementById("mt-go").onclick = () => {
+  const v = (id) => document.getElementById(id).value;
+  run(`move_to ${v("mt-x")} ${v("mt-y")} ${v("mt-z")}`);
+};
+
+const jt = document.getElementById("joint-table");
+const valCells = [];
+JOINTS.forEach((j, i) => {
+  const tr = document.createElement("tr");
+  const unit = j.name === "gripper" ? "%" : "°";
+  tr.innerHTML = `<td class="name">${j.name}</td><td class="val"></td>`;
+  valCells.push(tr.querySelector(".val"));
+  for (const d of [-15, -5, -1, 1, 5, 15]) {
+    const td = document.createElement("td");
+    const b = document.createElement("button");
+    b.textContent = `${d > 0 ? "+" : ""}${d}${unit}`;
+    b.title = `nudge ${j.name} ${d}`;
+    b.onclick = () => run(`nudge ${j.name} ${d}`);
+    td.appendChild(b); tr.appendChild(td);
+  }
+  jt.appendChild(tr);
+});
+
+const stateEl = document.getElementById("state");
+let lastStateText = "";
+function refreshUi() {
+  const t = stateText();
+  if (t !== lastStateText) { stateEl.textContent = t; lastStateText = t; }
+  JOINTS.forEach((j, i) => (valCells[i].textContent = `${q[i].toFixed(1)}${j.name === "gripper" ? "%" : "°"}`));
+}
+
+// ------------------------------------------------------------
+// ループ
+// ------------------------------------------------------------
+// Jev版: サーバーから操作されるので、タブが裏に回って requestAnimationFrame が
+// 止まってもシミュレーションは進める（setInterval は裏では約1秒おきに間引かれるため、
+// 経過時間を細かい刻みに分けてまとめて進める）
+let last = performance.now(), uiTimer = 0;
+function advance(now) {
+  let elapsed = Math.min(2, (now - last) / 1000); last = now;
+  uiTimer += elapsed;
+  while (elapsed > 0) { const dt = Math.min(0.02, elapsed); stepSim(dt); elapsed -= dt; }
+}
+function frame(now) {
+  advance(now);
+  updateWristCamera();
+  for (const v of Object.values(views)) v.renderer.render(scene, v.camera);
+  if (uiTimer > 0.1) { uiTimer = 0; refreshUi(); }
+  requestAnimationFrame(frame);
+}
+setInterval(() => { if (document.hidden) advance(performance.now()); }, 100);
+
+// 外部（エージェント）向けAPI
+window.robot = {
+  run,
+  stop,
+  getState,
+  stateText,
+  snapshot: (name = "overhead") => views[name].renderer.domElement.toDataURL("image/png"),
+};
+
+resetCubes(1);
+applyPose();
+resize();
+log("ready. 'help' でコマンド一覧", "ok");
+requestAnimationFrame(frame);
+</script>
+
+<script type="module">
+// ------------------------------------------------------------
+// Jev ブリッジ: server-jev.js とつなぐ
+//   サーバー → ブラウザ : SSE (/events) で { id, cmd } を受け取り robot.run() で実行
+//   ブラウザ → サーバー : 実行結果 (/api/result) と状態 (/api/state) を POST
+// ------------------------------------------------------------
+const $ = (id) => document.getElementById(id);
+const post = (url, body) => fetch(url, {
+  method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body ?? {}),
+}).catch(() => null);
+
+if (location.protocol.startsWith("http")) {
+  const es = new EventSource("/events");
+  es.onopen = () => { $("jev-conn").textContent = "server: 接続中"; $("jev-conn").className = "pill on"; };
+  es.onerror = () => { $("jev-conn").textContent = "server: 切断"; $("jev-conn").className = "pill err"; };
+  es.addEventListener("command", async (e) => {
+    const { id, cmd } = JSON.parse(e.data);
+    const text = await robot.run(cmd);
+    post("/api/result", { id, text, state: robot.getState() });
+  });
+  es.addEventListener("agent", (e) => renderAgent(JSON.parse(e.data)));
+
+  setInterval(() => post("/api/state", robot.getState()), 250);
+  $("jev-start").onclick = () => post("/api/agent/start");
+  $("jev-stop").onclick = () => post("/api/agent/stop");
+} else {
+  $("jev-conn").textContent = "server: なし（node jev/server-jev.js で起動）";
+  $("jev-conn").className = "pill err";
+}
+
+function renderAgent(a) {
+  const st = $("jev-status");
+  st.textContent = a.running ? `running  step ${a.steps}` : a.done ? `done (${a.steps} steps)` : "stopped";
+  st.className = "pill" + (a.running ? " on" : a.lastError ? " err" : "");
+  const d = a.lastDecision;
+  const lines = [`model: ${a.model}${a.mock ? "  (MOCK: Jevを呼ばず簡易ルールで代用)" : ""}`];
+  if (a.lastError) lines.push(`error: ${a.lastError}`);
+  if (d) {
+    lines.push(`target: ${d.target}   action: ${d.action}${d.forced ? "（選択肢が1つのため Jev に聞かず実行）" : ""}   confidence: ${d.confidence ?? "-"}`);
+    if (d.phase) lines.push(`phase: ${d.phase}`);
+    if (d.allowedActions) lines.push(`選択肢: ${d.allowedActions.join(", ")}`);
+    const top = Object.entries(d.actionProbabilities || {}).sort((x, y) => y[1] - x[1]).slice(0, 4);
+    for (const [k, p] of top) lines.push(`  ${k.padEnd(16)} ${"█".repeat(Math.round(p * 20)).padEnd(20)} ${(p * 100).toFixed(0)}%`);
+    if (d.result) lines.push(`result: ${d.result}`);
+  }
+  $("jev-decision").textContent = lines.join("\n");
+}
+</script>
+</body>
+</html>

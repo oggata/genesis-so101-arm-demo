@@ -30,6 +30,54 @@ cd docs/sim && python3 -m http.server 8000   # → http://localhost:8000
 
 ---
 
+## Jev 版（TypeSafe AI の Jev に自律操作させる）
+
+`jev/` に、上のブラウザ版をベースにした Jev 操作バージョンがあります（`docs/sim` はそのまま）。
+依存パッケージなし（Node 18 以上）。
+
+```bash
+cp jev/.env.example jev/.env   # TYPESAFE_API_KEY=... を記入（jev/.env は .gitignore 済み）
+node jev/server-jev.js
+# → http://localhost:3000 を開いて「Start Jev」
+```
+
+APIキーなしで動作確認したいときは、Jev の代わりに簡易ルールで動かせます。
+
+```bash
+JEV_MOCK=1 node jev/server-jev.js
+```
+
+仕組み
+
+	1. ブラウザが状態（関節・手先・キューブ・トレイ）を 250ms ごとに POST /api/state で報告
+	2. サーバーが Jev の POST /v1/systemone に以下を送信
+	   state   : 手先位置、キューブ位置、今の段階 (phase)、目標点 goal_cm と差分 delta_cm、直前の結果
+	   target  : choice - 次に運ぶキューブ（何も持っていないときだけ）
+	   action  : choice - forward/back/left/right (2cm, 0.5cm) / up_2cm / down_2cm / down_05cm / open / close
+	3. 選ばれた一手を SSE (/events) でブラウザに送り robot.run() で実行、結果を次の判断に渡す
+	4. 5個すべてトレイに入るか、最大ステップ数で終了
+
+環境変数（jev/.env に書くか、コマンドの前に指定。コマンド側が優先）
+
+	TYPESAFE_API_KEY  Jev の API キー（JEV_MOCK=1 以外では必須）
+	JEV_MODEL         default: jev-latest
+	JEV_MOCK          "1" で Jev を呼ばずに簡易ルールで動かす
+	JEV_AUTOSTART     "1" でブラウザ接続時に自動開始
+	JEV_TICK_MS       意思決定の間隔 (default: 300)
+	JEV_MAX_STEPS     最大ステップ数 (default: 400)
+	PORT              default: 3000
+
+API
+
+	$ curl http://localhost:3000/api/state                 // シムの状態
+	$ curl http://localhost:3000/api/agent                 // Jev の直近の判断・確率・ログ
+	$ curl -X POST http://localhost:3000/api/agent/start
+	$ curl -X POST http://localhost:3000/api/agent/stop
+	$ curl -X POST http://localhost:3000/api/reset
+	$ curl -X POST http://localhost:3000/api/run -H 'Content-Type: application/json' -d '{"cmd":"move_to 18 0 5"}'
+
+---
+
 ## セットアップ
 
 ### 1. ファイルを配置する
